@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 import folium
 import html as _html
-
 from app.data.airports_repo import airports_repo
-
 
 def _as_paragraphs(text: str) -> str:
     """Convert blank-line separated text into <p> blocks, HTML-escaped."""
@@ -15,76 +13,10 @@ def _as_paragraphs(text: str) -> str:
     parts = [p.strip() for p in safe.split("\n\n") if p.strip()]
     return "<p>" + "</p><p>".join(parts) + "</p>"
 
-
-def _sanitize_featurecollection(gj: dict | None) -> dict:
-    """Return a safe FeatureCollection shape for Folium."""
-    if not isinstance(gj, dict) or gj.get("type") != "FeatureCollection":
-        return {"type": "FeatureCollection", "features": []}
-    feats = gj.get("features")
-    if not isinstance(feats, list):
-        return {"type": "FeatureCollection", "features": []}
-    # drop invalid features
-    safe_feats = [f for f in feats if isinstance(f, dict)]
-    return {"type": "FeatureCollection", "features": safe_feats}
-
-
-def _ensure_prop(gj: dict | None, key: str, default: str) -> dict:
-    """
-    Folium GeoJsonTooltip asserts requested fields exist in feature properties.
-    Ensure every feature has properties[key] as a non-empty string.
-    """
-    gj = _sanitize_featurecollection(gj)
-
-    for feat in gj["features"]:
-        props = feat.get("properties")
-        if not isinstance(props, dict):
-            props = {}
-            feat["properties"] = props
-
-        if props.get(key) in (None, ""):
-            props[key] = props.get("hazard") or props.get("phenomenon") or props.get("type") or default
-
-    return gj
-
-
-def _safe_tooltip(gj: dict, preferred_fields: list[str], aliases: list[str] | None = None):
-    """
-    Build a GeoJsonTooltip only using fields that exist in ALL features.
-    Returns None if no safe fields exist.
-    """
-    feats = gj.get("features") if isinstance(gj, dict) else None
-    if not isinstance(feats, list) or not feats:
-        return None
-
-    common: set[str] | None = None
-    for f in feats:
-        props = f.get("properties") if isinstance(f, dict) else None
-        if not isinstance(props, dict):
-            props = {}
-        kset = set(props.keys())
-        common = kset if common is None else (common & kset)
-
-    if not common:
-        return None
-
-    fields = [f for f in preferred_fields if f in common]
-    if not fields:
-        return None
-
-    if aliases and len(aliases) == len(preferred_fields):
-        # Map alias list to only the kept fields
-        alias_map = dict(zip(preferred_fields, aliases))
-        kept_aliases = [alias_map[f] for f in fields]
-    else:
-        kept_aliases = None
-
-    return folium.GeoJsonTooltip(fields=fields, aliases=kept_aliases, sticky=False)
-
-
 class MapService:
     """
     Builds an interactive Folium HTML map for the route corridor.
-    Includes METAR markers (surface) + PIREPs (aloft) + SIGMET/G-AIRMET polygons.
+    Now includes optional METAR markers (surface conditions).
     """
 
     def build(
@@ -99,6 +31,33 @@ class MapService:
         dest_taf: dict | None = None,
         briefing: str | None = None,
     ) -> str:
+        
+        def _ensure_tooltip_field(gj: dict | None, field: str, default: str = "") -> dict:
+            """
+            Folium GeoJsonTooltip asserts that every requested field exists in every feature's properties.
+            Ensure that by adding missing keys with a safe default.
+            """
+            if not isinstance(gj, dict):
+                return {"type": "FeatureCollection", "features": []}
+
+            if gj.get("type") != "FeatureCollection" or not isinstance(gj.get("features"), list):
+                return {"type": "FeatureCollection", "features": []}
+
+            for feat in gj["features"]:
+                if not isinstance(feat, dict):
+                    continue
+                props = feat.get("properties")
+                if not isinstance(props, dict):
+                    props = {}
+                    feat["properties"] = props
+
+                # Use existing values if present, otherwise set a default
+                if field not in props or props.get(field) in (None, ""):
+                    # Try a couple common alternate keys before defaulting
+                    props[field] = props.get("phenomenon") or props.get("type") or default
+
+            return gj
+
 
         def _mk_airport_popup(title: str, metar_raw: str | None, taf_raw: str | None) -> str:
             parts = [f"<b>{title}</b>"]
@@ -125,37 +84,41 @@ class MapService:
                 ) or None
             return None
 
-        metar_rows = metar_rows or []
-        pirep_rows = pirep_rows or []
-
         origin_metar_raw = _metar_raw_for_station(metar_rows, route.origin.icao)
         dest_metar_raw = _metar_raw_for_station(metar_rows, route.destination.icao)
 
         origin_taf_raw = (origin_taf or {}).get("raw") if isinstance(origin_taf, dict) else None
         dest_taf_raw = (dest_taf or {}).get("raw") if isinstance(dest_taf, dict) else None
 
+
+        metar_rows = metar_rows or []
         points: List[Tuple[float, float]] = route.route_points
+
+
         mid = points[len(points) // 2]
         m = folium.Map(location=[mid[0], mid[1]], zoom_start=5, control_scale=True)
 
-        # Briefing overlay
+
+        # ✅ Briefing overlay (top-left panel)
         if briefing:
             briefing_html = _as_paragraphs(briefing)
+
             panel = f"""
             <div style="
                 position: fixed; top: 14px; left: 14px; z-index: 10000;
                 background: rgba(255,255,255,0.97); padding: 12px 14px; border-radius: 10px;
                 box-shadow: 0 4px 16px rgba(0,0,0,.25);
                 font: 13px/1.45 system-ui,-apple-system,'Segoe UI',Roboto,Arial;">
-              <div style="font-weight:600; margin-bottom:6px;">
+            <div style="font-weight:600; margin-bottom:6px;">
                 Captain-style Briefing (not the operating crew)
-              </div>
-              <div style="max-width: 460px; max-height: 260px; overflow:auto;">
+            </div>
+            <div style="max-width: 460px; max-height: 260px; overflow:auto;">
                 {briefing_html}
-              </div>
+            </div>
             </div>
             """
             m.get_root().html.add_child(folium.Element(panel))
+
 
         # Corridor polygon
         folium.GeoJson(
@@ -178,7 +141,7 @@ class MapService:
             tooltip="Great-circle route",
         ).add_to(m)
 
-        # Origin/Destination markers
+        # Origin/Destination markers (now include METAR + TAF)
         folium.Marker(
             location=[route.origin.lat, route.origin.lon],
             tooltip=f"Origin: {route.origin.icao}",
@@ -207,7 +170,9 @@ class MapService:
             icon=folium.Icon(color="red"),
         ).add_to(m)
 
-        # METAR layer
+        # METAR markers (surface conditions near airports)
+        metar_rows = metar_rows or []
+
         def cat_color(cat: str | None) -> str:
             cat = (cat or "").upper()
             if cat == "VFR":
@@ -221,6 +186,7 @@ class MapService:
             return "gray"
 
         metar_layer = folium.FeatureGroup(name="METAR (surface)", show=True)
+
         for row in metar_rows:
             lat = row.get("lat")
             lon = row.get("lon")
@@ -230,7 +196,10 @@ class MapService:
             icao = (row.get("icaoId") or row.get("stationId") or "").upper()
             raw = row.get("rawOb") or row.get("rawObs") or row.get("rawText") or ""
             cat = row.get("flightCat") or row.get("fltCat") or row.get("flightCategory")
-            cat = cat.strip().upper() if isinstance(cat, str) else None
+            if isinstance(cat, str):
+                cat = cat.strip().upper()
+            else:
+                cat = None
 
             color = cat_color(cat)
             popup_html = (
@@ -253,8 +222,10 @@ class MapService:
 
         metar_layer.add_to(m)
 
-        # PIREP layer
+        pirep_rows = pirep_rows or []
+
         def pirep_intensity(p: dict) -> str | None:
+            # turb/icing intensity fields commonly: tbInt1/tbInt2, icgInt1/icgInt2
             vals = [
                 str(p.get("tbInt1") or "").upper(),
                 str(p.get("tbInt2") or "").upper(),
@@ -279,6 +250,7 @@ class MapService:
             return "gray"
 
         pirep_layer = folium.FeatureGroup(name="PIREPs (aloft)", show=True)
+
         for p in pirep_rows:
             lat = p.get("lat")
             lon = p.get("lon")
@@ -317,12 +289,12 @@ class MapService:
 
         pirep_layer.add_to(m)
 
-        # Advisories (SIGMET / G-AIRMET)
-        gairmet = gairmet if isinstance(gairmet, dict) else {}
-        sigmet = sigmet if isinstance(sigmet, dict) else {"type": "FeatureCollection", "features": []}
+        gairmet = gairmet or {}
+        sigmet = sigmet or {"type": "FeatureCollection", "features": []}
 
         def _hazard_color(props: dict) -> str:
             hz = (props.get("hazard") or props.get("type") or props.get("phenom") or "").lower()
+            # simple mapping; tweak anytime
             if "conv" in hz or "ts" in hz:
                 return "red"
             if "turb" in hz or "llws" in hz:
@@ -335,42 +307,35 @@ class MapService:
 
         def _style(feat):
             props = (feat or {}).get("properties", {}) or {}
-            if not isinstance(props, dict):
-                props = {}
             c = _hazard_color(props)
             return {"color": c, "weight": 2, "fillOpacity": 0.12}
 
-        # SIGMET layer (sanitize + safe tooltip)
-        sigmet = _ensure_prop(sigmet, "hazard", "SIGMET")
-        sigmet_tooltip = _safe_tooltip(sigmet, ["hazard"], aliases=["Hazard"])
+        sigmet = _ensure_tooltip_field(sigmet, "hazard", default="SIGMET")
+
+        # SIGMET layer
         folium.GeoJson(
             data=sigmet,
             name="SIGMETs",
             style_function=_style,
-            tooltip=sigmet_tooltip,
+            tooltip=folium.GeoJsonTooltip(fields=["hazard"], aliases=["Hazard"], sticky=False),
             show=(not calm),
         ).add_to(m)
 
-        # G-AIRMET layers (sanitize + safe tooltip)
-        for key, label in [
-            ("tango", "G-AIRMET (Tango - Turb)"),
-            ("zulu", "G-AIRMET (Zulu - Icing)"),
-            ("sierra", "G-AIRMET (Sierra - IFR/Mtn)"),
-        ]:
-            gj = gairmet.get(key)
+        # G-AIRMET layers
+        for key, label in [("tango", "G-AIRMET (Tango - Turb)"), ("zulu", "G-AIRMET (Zulu - Icing)"), ("sierra", "G-AIRMET (Sierra - IFR/Mtn)")]:
+            gj = gairmet.get(key) if isinstance(gairmet, dict) else None
             if not gj:
                 continue
-
-            gj = _ensure_prop(gj, "hazard", "G-AIRMET")
-            gj_tooltip = _safe_tooltip(gj, ["hazard"], aliases=["Hazard"])
+            gj = _ensure_tooltip_field(gj, "hazard", default="G-AIRMET")
 
             folium.GeoJson(
                 data=gj,
                 name=label,
                 style_function=_style,
-                tooltip=gj_tooltip,
+                tooltip=folium.GeoJsonTooltip(fields=["hazard"], aliases=["Hazard"], sticky=False),
                 show=(not calm),
             ).add_to(m)
+
 
         # Fit to corridor bbox
         min_lon, min_lat, max_lon, max_lat = route.corridor_bbox
