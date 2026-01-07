@@ -334,6 +334,7 @@ class ForecastService:
             origin_taf=o_taf,
             dest_taf=d_taf,
             briefing=briefing,
+            embed=req.embed,
         )
 
 

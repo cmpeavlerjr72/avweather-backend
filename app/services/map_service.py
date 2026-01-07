@@ -98,6 +98,7 @@ class MapService:
         origin_taf: dict | None = None,
         dest_taf: dict | None = None,
         briefing: str | None = None,
+        embed: bool = False,
     ) -> str:
 
         def _mk_airport_popup(title: str, metar_raw: str | None, taf_raw: str | None) -> str:
@@ -139,7 +140,7 @@ class MapService:
         m = folium.Map(location=[mid[0], mid[1]], zoom_start=5, control_scale=True)
 
         # Briefing overlay
-        if briefing:
+        if briefing and not embed:
             briefing_html = _as_paragraphs(briefing)
             panel = f"""
             <div style="
