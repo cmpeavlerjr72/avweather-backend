@@ -31,6 +31,33 @@ class MapService:
         dest_taf: dict | None = None,
         briefing: str | None = None,
     ) -> str:
+        
+        def _ensure_tooltip_field(gj: dict | None, field: str, default: str = "") -> dict:
+            """
+            Folium GeoJsonTooltip asserts that every requested field exists in every feature's properties.
+            Ensure that by adding missing keys with a safe default.
+            """
+            if not isinstance(gj, dict):
+                return {"type": "FeatureCollection", "features": []}
+
+            if gj.get("type") != "FeatureCollection" or not isinstance(gj.get("features"), list):
+                return {"type": "FeatureCollection", "features": []}
+
+            for feat in gj["features"]:
+                if not isinstance(feat, dict):
+                    continue
+                props = feat.get("properties")
+                if not isinstance(props, dict):
+                    props = {}
+                    feat["properties"] = props
+
+                # Use existing values if present, otherwise set a default
+                if field not in props or props.get(field) in (None, ""):
+                    # Try a couple common alternate keys before defaulting
+                    props[field] = props.get("phenomenon") or props.get("type") or default
+
+            return gj
+
 
         def _mk_airport_popup(title: str, metar_raw: str | None, taf_raw: str | None) -> str:
             parts = [f"<b>{title}</b>"]
@@ -283,6 +310,8 @@ class MapService:
             c = _hazard_color(props)
             return {"color": c, "weight": 2, "fillOpacity": 0.12}
 
+        sigmet = _ensure_tooltip_field(sigmet, "hazard", default="SIGMET")
+
         # SIGMET layer
         folium.GeoJson(
             data=sigmet,
@@ -297,6 +326,8 @@ class MapService:
             gj = gairmet.get(key) if isinstance(gairmet, dict) else None
             if not gj:
                 continue
+            gj = _ensure_tooltip_field(gj, "hazard", default="G-AIRMET")
+
             folium.GeoJson(
                 data=gj,
                 name=label,
