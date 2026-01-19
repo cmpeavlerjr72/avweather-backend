@@ -139,6 +139,61 @@ class MapService:
         mid = points[len(points) // 2]
         m = folium.Map(location=[mid[0], mid[1]], zoom_start=5, control_scale=True)
 
+        explain_js = """
+        <script>
+        window.__bbExplain = async function(btn){
+        try{
+            const type = btn.getAttribute("data-type");
+            const station = btn.getAttribute("data-station") || null;
+            const fl = btn.getAttribute("data-fl") || null;
+            const root = btn.closest("div");
+            const rawEl = root ? root.querySelector("pre[data-raw='1']") : null;
+            const outEl = root ? root.querySelector("div[data-plain='1']") : null;
+
+            if(!rawEl || !outEl) return;
+
+            btn.disabled = true;
+            btn.innerText = "Explaining...";
+
+            const body = {
+            type: type,
+            text: rawEl.innerText,
+            station: station,
+            fl: fl
+            };
+
+            const resp = await fetch("/api/interpret", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify(body)
+            });
+
+            if(!resp.ok){
+            outEl.innerText = "Could not interpret right now.";
+            btn.innerText = "Explain";
+            btn.disabled = false;
+            return;
+            }
+
+            const data = await resp.json();
+            outEl.innerText = data.plain || "";
+            btn.innerText = "Re-explain";
+            btn.disabled = false;
+        }catch(e){
+            try{
+            const outEl = btn.parentElement.querySelector("div[data-plain='1']");
+            if(outEl) outEl.innerText = "Could not interpret right now.";
+            }catch(_){}
+            btn.innerText = "Explain";
+            btn.disabled = false;
+        }
+        }
+        </script>
+        """
+        m.get_root().html.add_child(folium.Element(explain_js))
+
+
+
         # Briefing overlay
         if briefing and not embed:
             briefing_html = _as_paragraphs(briefing)
@@ -233,23 +288,34 @@ class MapService:
             color = cat_color(cat)
             plain = (row.get("plain") or "").strip()
             raw = row.get("rawOb") or row.get("rawObs") or row.get("rawText") or row.get("raw") or ""
+            raw_safe = _html.escape(str(raw))
+            station_safe = _html.escape(str(icao))
 
-            popup_html = (
-                f"<b>{icao}</b> "
-                f"<span style='padding:2px 6px;border-radius:10px;background:{color};color:white;'>"
-                f"{(cat or 'UNK')}</span>"
-            )
+            popup_html = f"""
+            <div style="font: 13px/1.35 system-ui,-apple-system,'Segoe UI',Roboto,Arial;">
+            <div style="margin-bottom:6px;">
+                <b>{station_safe}</b>
+                <span style="padding:2px 6px;border-radius:10px;background:{color};color:white;">
+                {(cat or 'UNK')}
+                </span>
+            </div>
 
-            if plain:
-                popup_html += f"<div style='margin-top:6px;'>{_as_paragraphs(plain)}</div>"
-                if raw:
-                    popup_html += (
-                        "<details style='margin-top:8px;'><summary>Show raw METAR</summary>"
-                        f"<pre style='white-space:pre-wrap;margin-top:6px;'>{_html.escape(str(raw))}</pre>"
-                        "</details>"
-                    )
-            else:
-                popup_html += f"<br><pre style='white-space:pre-wrap;margin-top:6px;'>{raw}</pre>"
+            <button
+                style="padding:6px 10px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer;"
+                data-type="metar"
+                data-station="{station_safe}"
+                onclick="window.__bbExplain(this)">
+                Explain
+            </button>
+
+            <div data-plain="1" style="margin-top:8px; white-space:pre-wrap;"></div>
+
+            <details style="margin-top:8px;">
+                <summary>Show raw METAR</summary>
+                <pre data-raw="1" style="white-space:pre-wrap;margin-top:6px;">{raw_safe}</pre>
+            </details>
+            </div>
+            """
 
 
             folium.CircleMarker(
@@ -307,25 +373,36 @@ class MapService:
             ic2 = (p.get("icgInt2") or "")
             plain = (p.get("plain") or "").strip()
             raw = p.get("rawOb") or p.get("raw") or ""
+            raw_safe = _html.escape(str(raw))
+            fl_safe = _html.escape(str(p.get("fltLvl") or ""))
 
-            popup = (
-                f"<b>PIREP</b> "
-                f"<span style='padding:2px 6px;border-radius:10px;background:{color};color:white;'>"
-                f"{(lvl or 'UNK')}</span>"
-                f"<br>FL: {fl}"
-                f"<br>TB: {tb1} {tb2} | ICE: {ic1} {ic2}"
-            )
+            popup = f"""
+            <div style="font: 13px/1.35 system-ui,-apple-system,'Segoe UI',Roboto,Arial;">
+            <div style="margin-bottom:6px;">
+                <b>PIREP</b>
+                <span style="padding:2px 6px;border-radius:10px;background:{color};color:white;">
+                {(lvl or 'UNK')}
+                </span>
+                <div>FL: {fl_safe}</div>
+                <div>TB: {_html.escape(str(tb1))} {_html.escape(str(tb2))} | ICE: {_html.escape(str(ic1))} {_html.escape(str(ic2))}</div>
+            </div>
 
-            if plain:
-                popup += f"<div style='margin-top:6px;'>{_as_paragraphs(plain)}</div>"
-                if raw:
-                    popup += (
-                        "<details style='margin-top:8px;'><summary>Show raw PIREP</summary>"
-                        f"<pre style='white-space:pre-wrap;margin-top:6px;'>{_html.escape(str(raw))}</pre>"
-                        "</details>"
-                    )
-            else:
-                popup += f"<br><pre style='white-space:pre-wrap;margin-top:6px;'>{raw}</pre>"
+            <button
+                style="padding:6px 10px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer;"
+                data-type="pirep"
+                data-fl="{fl_safe}"
+                onclick="window.__bbExplain(this)">
+                Explain
+            </button>
+
+            <div data-plain="1" style="margin-top:8px; white-space:pre-wrap;"></div>
+
+            <details style="margin-top:8px;">
+                <summary>Show raw PIREP</summary>
+                <pre data-raw="1" style="white-space:pre-wrap;margin-top:6px;">{raw_safe}</pre>
+            </details>
+            </div>
+            """
 
 
             folium.CircleMarker(

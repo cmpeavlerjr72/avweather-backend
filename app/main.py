@@ -8,6 +8,8 @@ from app.api.routes.maps import router as maps_router
 
 from app.api.routes.airports import router as airports_router
 
+from app.api.routes.interpret import router as interpret_router
+
 
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name)
@@ -27,6 +29,7 @@ def create_app() -> FastAPI:
     app.include_router(forecast_router, prefix="/api", tags=["forecast"])
     app.include_router(maps_router, tags=["maps"])
     app.include_router(airports_router, prefix="/api", tags=["airports"])
+    app.include_router(interpret_router, prefix="/api", tags=["interpret"])
 
 
     return app
