@@ -178,7 +178,7 @@ class MapService:
 
             outEl.innerText = "Calling API...";
 
-            const resp = await fetch("/api/interpret", {
+            const resp = await fetch(window.location.origin + "/api/interpret", {
             method: "POST",
             headers: {"Content-Type":"application/json", "X-BB-Tier": (window.__BB_TIER || "free")},
             body: JSON.stringify(body),
@@ -203,6 +203,7 @@ class MapService:
             try {
             data = JSON.parse(rawBody);
             } catch (e) {
+            console.error("Interpret failed", e);
             outEl.innerText = "Bad JSON response: " + rawBody;
             outEl.setAttribute("data-busy", "0");
             btn.disabled = false;
