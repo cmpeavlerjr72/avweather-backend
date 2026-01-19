@@ -184,7 +184,22 @@ class MapService:
             }
 
             const data = await resp.json();
-            outEl.innerText = data.plain || "";
+            const txt = (data.plain || "").trim();
+
+            // Convert leading dashes or bullets into real bullet points
+            const lines = txt
+            .split(/\n+/)
+            .map(l => l.replace(/^[-•]\s*/, "").trim())
+            .filter(Boolean);
+
+            if(lines.length > 1){
+            outEl.innerHTML = "<ul style='padding-left:18px;margin:0;'>" +
+                lines.map(l => `<li style="margin-bottom:6px;">${l}</li>`).join("") +
+                "</ul>";
+            } else {
+            outEl.innerText = txt;
+            }
+
             outEl.setAttribute("data-loaded", "1");
             outEl.setAttribute("data-busy", "0");
             btn.disabled = false;
@@ -331,7 +346,8 @@ class MapService:
 
             raw_attr = _html.escape(str(raw)).replace('"', "&quot;")
             popup_html = f"""
-            <div data-rawtext="{raw_attr}" style="font: 13px/1.35 system-ui,-apple-system,'Segoe UI',Roboto,Arial;">
+            <div data-rawtext="{raw_attr}" style="  font: 13px/1.4 system-ui,-apple-system,'Segoe UI',Roboto,Arial;
+            max-width: 260px;">
 
             <div style="margin-bottom:6px;">
                 <b>{station_safe}</b>
@@ -343,10 +359,20 @@ class MapService:
             <button data-type="metar" data-station="{station_safe}" style="display:none;"></button>
 
 
-            <div data-plain="1" style="margin-top:8px; white-space:pre-wrap;">Interpreting...</div>
+            <div data-plain="1" style="
+                margin-top:8px;
+                white-space:pre-wrap;
+                max-height: 120px;
+                overflow-y: auto;
+                padding-right: 4px;
+                line-height: 1.45;
+                ">
+                Interpreting...
+                </div>
 
 
-            <details style="margin-top:8px;">
+
+            <details style="margin-top:8px; font-size:12px; opacity:0.85;">
                 <summary>Show raw METAR</summary>
                 <pre data-raw="1" style="white-space:pre-wrap;margin-top:6px;">{raw_safe}</pre>
             </details>
@@ -429,10 +455,20 @@ class MapService:
 
 
 
-            <div data-plain="1" style="margin-top:8px; white-space:pre-wrap;">Interpreting...</div>
+            <div data-plain="1" style="
+            margin-top:8px;
+            white-space:pre-wrap;
+            max-height: 120px;
+            overflow-y: auto;
+            padding-right: 4px;
+            line-height: 1.45;
+            ">
+            Interpreting...
+            </div>
 
 
-            <details style="margin-top:8px;">
+
+            <details style="margin-top:8px; font-size:12px; opacity:0.85;">
                 <summary>Show raw PIREP</summary>
                 <pre data-raw="1" style="white-space:pre-wrap;margin-top:6px;">{raw_safe}</pre>
             </details>
