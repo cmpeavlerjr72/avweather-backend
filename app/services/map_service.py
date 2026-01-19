@@ -143,7 +143,7 @@ class MapService:
         tier_js = f"<script>window.__BB_TIER = {repr((tier or 'free').lower().strip())};</script>"
         m.get_root().html.add_child(folium.Element(tier_js))
 
-        explain_js = """
+        explain_js = r"""
         <script>
         window.__bbExplain = async function(btn){
         try{
