@@ -146,21 +146,19 @@ class MapService:
             const type = btn.getAttribute("data-type");
             const station = btn.getAttribute("data-station") || null;
             const fl = btn.getAttribute("data-fl") || null;
+
             const root = btn.closest("div");
             const rawEl = root ? root.querySelector("pre[data-raw='1']") : null;
             const outEl = root ? root.querySelector("div[data-plain='1']") : null;
-
             if(!rawEl || !outEl) return;
+
+            // If we already have text, don't spam the API on re-open
+            if(outEl.getAttribute("data-loaded") === "1") return;
 
             btn.disabled = true;
             btn.innerText = "Explaining...";
 
-            const body = {
-            type: type,
-            text: rawEl.innerText,
-            station: station,
-            fl: fl
-            };
+            const body = { type: type, text: rawEl.innerText, station: station, fl: fl };
 
             const resp = await fetch("/api/interpret", {
             method: "POST",
@@ -169,7 +167,8 @@ class MapService:
             });
 
             if(!resp.ok){
-            outEl.innerText = "Could not interpret right now.";
+            const txt = await resp.text();
+            outEl.innerText = "Interpret error (" + resp.status + "): " + txt;
             btn.innerText = "Explain";
             btn.disabled = false;
             return;
@@ -177,19 +176,58 @@ class MapService:
 
             const data = await resp.json();
             outEl.innerText = data.plain || "";
-            btn.innerText = "Re-explain";
+            outEl.setAttribute("data-loaded", "1");
+
+            btn.innerText = "Explained";
             btn.disabled = false;
         }catch(e){
             try{
-            const outEl = btn.parentElement.querySelector("div[data-plain='1']");
-            if(outEl) outEl.innerText = "Could not interpret right now.";
+            const root = btn.closest("div");
+            const outEl = root ? root.querySelector("div[data-plain='1']") : null;
+            if(outEl) outEl.innerText = "Interpretation failed.";
             }catch(_){}
             btn.innerText = "Explain";
             btn.disabled = false;
         }
-        }
+        };
+
+        // Auto-run when any popup opens (Leaflet)
+        document.addEventListener("DOMContentLoaded", function(){
+        const tryWire = () => {
+            // Find the Leaflet map object created in the page
+            // Folium usually puts it on window with a generated name; we search for any map-like object.
+            for (const k in window){
+            const v = window[k];
+            if(v && typeof v.on === "function" && typeof v.eachLayer === "function"){
+                v.on("popupopen", function(e){
+                try{
+                    const el = e && e.popup && e.popup.getElement ? e.popup.getElement() : null;
+                    if(!el) return;
+                    const btn = el.querySelector("button[data-type]");
+                    if(btn){
+                    // hide the button (no need for user to click)
+                    btn.style.display = "none";
+                    window.__bbExplain(btn);
+                    }
+                }catch(_){}
+                });
+                return true;
+            }
+            }
+            return false;
+        };
+
+        // Try immediately, then retry a few times in case map initializes late
+        if(tryWire()) return;
+        let n = 0;
+        const t = setInterval(() => {
+            n += 1;
+            if(tryWire() || n > 20) clearInterval(t);
+        }, 250);
+        });
         </script>
         """
+
         m.get_root().html.add_child(folium.Element(explain_js))
 
 
@@ -308,7 +346,8 @@ class MapService:
                 Explain
             </button>
 
-            <div data-plain="1" style="margin-top:8px; white-space:pre-wrap;"></div>
+            <div data-plain="1" style="margin-top:8px; white-space:pre-wrap;">Interpreting...</div>
+
 
             <details style="margin-top:8px;">
                 <summary>Show raw METAR</summary>
@@ -395,7 +434,8 @@ class MapService:
                 Explain
             </button>
 
-            <div data-plain="1" style="margin-top:8px; white-space:pre-wrap;"></div>
+            <div data-plain="1" style="margin-top:8px; white-space:pre-wrap;">Interpreting...</div>
+
 
             <details style="margin-top:8px;">
                 <summary>Show raw PIREP</summary>
