@@ -377,5 +377,5 @@ class MapService:
         min_lon, min_lat, max_lon, max_lat = route.corridor_bbox
         m.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]])
 
-        folium.LayerControl(collapsed=False).add_to(m)
+        folium.LayerControl(collapsed=True).add_to(m)
         return m.get_root().render()
