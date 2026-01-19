@@ -327,8 +327,6 @@ class ForecastService:
             },
         }
 
-        # LLM/fallback briefing AFTER summary dict is closed
-        from app.services.briefing_service import BriefingService, BriefingInputs
 
         briefing = BriefingService().generate(
             BriefingInputs(
