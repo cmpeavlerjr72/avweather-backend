@@ -7,6 +7,8 @@ class ForecastRequest(BaseModel):
     cruise_fl: int = Field(..., ge=0, le=600, description="Cruise flight level (e.g., 340)")
     calm: bool = Field(default=True, description="Passenger-friendly tone")
     embed: bool = False
+    tier: str | None = "free"
+
 
 class ForecastResponse(BaseModel):
     id: str

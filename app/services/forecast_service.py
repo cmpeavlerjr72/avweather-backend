@@ -189,7 +189,7 @@ class ForecastService:
             lvl = _pirep_intensity(p)
             pirep_counts[lvl or "UNK"] += 1
 
-                # 3c) Fetch advisories (G-AIRMET + SIGMET) and clip to corridor
+        # 3c) Fetch advisories (G-AIRMET + SIGMET) and clip to corridor
         gairmet = {"type": "FeatureCollection", "features": []}
         sigmet = {"type": "FeatureCollection", "features": []}
 
@@ -302,8 +302,10 @@ class ForecastService:
             },
         }
 
+        bs = BriefingService()
+        bs.set_tier(getattr(req, "tier", "free"))
 
-        briefing = BriefingService().generate(
+        briefing = bs.generate(
             BriefingInputs(
                 origin=req.origin,
                 destination=req.destination,
@@ -337,6 +339,7 @@ class ForecastService:
             dest_taf=d_taf,
             briefing=briefing,
             embed=req.embed,
+            tier=getattr(req, "tier", "free"),
         )
 
 

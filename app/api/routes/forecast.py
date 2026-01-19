@@ -13,7 +13,9 @@ async def post_forecast(
     svc: ForecastService = Depends(get_forecast_service),
 ):
     try:
+        payload.tier = request.headers.get("X-BB-Tier", payload.tier or "free")
         return await svc.generate(payload)
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except TimeoutError:

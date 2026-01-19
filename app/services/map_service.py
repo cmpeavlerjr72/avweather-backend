@@ -99,6 +99,7 @@ class MapService:
         dest_taf: dict | None = None,
         briefing: str | None = None,
         embed: bool = False,
+        tier: str = 'free',
     ) -> str:
 
         def _mk_airport_popup(title: str, metar_raw: str | None, taf_raw: str | None) -> str:
@@ -139,6 +140,9 @@ class MapService:
         mid = points[len(points) // 2]
         m = folium.Map(location=[mid[0], mid[1]], zoom_start=5, control_scale=True)
 
+        tier_js = f"<script>window.__BB_TIER = {repr((tier or 'free').lower().strip())};</script>"
+        m.get_root().html.add_child(folium.Element(tier_js))
+
         explain_js = """
         <script>
         window.__bbExplain = async function(btn){
@@ -169,11 +173,20 @@ class MapService:
 
             const body = { type: type, text: rawText, station: station, fl: fl };
 
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 12000);
+
+            outEl.innerText = "Calling API...";
+
             const resp = await fetch("/api/interpret", {
             method: "POST",
-            headers: {"Content-Type":"application/json"},
-            body: JSON.stringify(body)
+            headers: {"Content-Type":"application/json", "X-BB-Tier": (window.__BB_TIER || "free")},
+            body: JSON.stringify(body),
+            signal: controller.signal
             });
+
+            clearTimeout(timer);
+
 
             if(!resp.ok){
             const txt = await resp.text();
@@ -183,8 +196,28 @@ class MapService:
             return;
             }
 
-            const data = await resp.json();
-            const txt = (data.plain || "").trim();
+            outEl.innerText = "Parsing...";
+            const rawBody = await resp.text();
+
+            let data = null;
+            try {
+            data = JSON.parse(rawBody);
+            } catch (e) {
+            outEl.innerText = "Bad JSON response: " + rawBody;
+            outEl.setAttribute("data-busy", "0");
+            btn.disabled = false;
+            return;
+            }
+
+            const txt = ((data && data.plain) ? data.plain : "").trim();
+
+            if(!txt){
+            outEl.innerText = "No interpretation returned.";
+            outEl.setAttribute("data-busy", "0");
+            btn.disabled = false;
+            return;
+            }
+
 
             // Convert leading dashes or bullets into real bullet points
             const lines = txt
@@ -208,7 +241,10 @@ class MapService:
             const root = btn.closest("div");
             const outEl = root ? root.querySelector("div[data-plain='1']") : null;
             if(outEl){
-                outEl.innerText = "Interpretation failed.";
+                outEl.innerText = (e && e.name === "AbortError")
+                ? "Interpretation timed out. Try again."
+                : ("Interpretation failed: " + (e && e.message ? e.message : ""));
+
                 outEl.setAttribute("data-busy", "0");
             }
             }catch(_){}
@@ -544,9 +580,35 @@ class MapService:
                 show=(not calm),
             ).add_to(m)
 
-        # Fit to corridor bbox
-        min_lon, min_lat, max_lon, max_lat = route.corridor_bbox
-        m.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]])
+        # Fit to corridor bbox (with fallback to route points if bbox is bad)
+        try:
+            min_lon, min_lat, max_lon, max_lat = route.corridor_bbox
+
+            def _bbox_ok(a, b, c, d):
+                try:
+                    a = float(a); b = float(b); c = float(c); d = float(d)
+                except Exception:
+                    return False
+                if not (-180 <= a <= 180 and -180 <= c <= 180 and -90 <= b <= 90 and -90 <= d <= 90):
+                    return False
+                if c <= a or d <= b:
+                    return False
+                # reject world-sized boxes (likely swapped / invalid)
+                if (c - a) > 80 or (d - b) > 40:
+                    return False
+                return True
+
+            if _bbox_ok(min_lon, min_lat, max_lon, max_lat):
+                m.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]])
+            else:
+                # Fallback: compute bounds from actual route points
+                lats = [float(lat) for (lat, lon) in points if lat is not None and lon is not None]
+                lons = [float(lon) for (lat, lon) in points if lat is not None and lon is not None]
+                if lats and lons:
+                    m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
+        except Exception:
+            pass
+
 
         folium.LayerControl(collapsed=True).add_to(m)
         return m.get_root().render()

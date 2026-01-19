@@ -23,6 +23,7 @@ async def post_interpret(
     request: Request,
     _=Depends(rate_limit),
 ):
+
     t = (payload.type or "").strip().lower()
     raw = (payload.text or "").strip()
     if t not in ("metar", "pirep"):
@@ -32,6 +33,10 @@ async def post_interpret(
 
     try:
         bs = BriefingService()
+
+        tier = request.headers.get("X-BB-Tier", "free")
+        bs.set_tier(tier)
+
         if t == "metar":
             plain = bs.interpret_metar(raw, station=payload.station)
         else:
@@ -43,5 +48,6 @@ async def post_interpret(
     except TimeoutError:
         raise HTTPException(status_code=504, detail="Interpretation timed out. Please try again.")
     except Exception as e:
-        # Don’t leak internals; keep it user-friendly
-        raise HTTPException(status_code=500, detail="Interpretation failed.")
+        # keep it safe but useful
+        raise HTTPException(status_code=500, detail=f"Interpretation failed: {type(e).__name__}")
+

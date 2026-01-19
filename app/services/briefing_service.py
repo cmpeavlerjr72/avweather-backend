@@ -164,8 +164,16 @@ class BriefingService:
 
     def __init__(self) -> None:
         self.api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
-        self.model = (os.getenv("OPENAI_MODEL") or "gpt-5").strip()
-        self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "260"))
+        self.model_free = (os.getenv("OPENAI_MODEL_FREE") or "gpt-4o-mini").strip()
+        self.model_pro = (os.getenv("OPENAI_MODEL_PRO") or "gpt-5").strip()
+
+        self.max_tokens_free = int(os.getenv("OPENAI_MAX_TOKENS_FREE", "180"))
+        self.max_tokens_pro = int(os.getenv("OPENAI_MAX_TOKENS_PRO", "320"))
+
+        # default behavior (no IAP yet): free
+        self.model = self.model_free
+        self.max_tokens = self.max_tokens_free
+
         self.allow_fallback = (os.getenv("ALLOW_BRIEFING_FALLBACK", "0").strip() == "1")
 
         if not self.api_key:
@@ -177,6 +185,16 @@ class BriefingService:
 
         self.client = OpenAI(api_key=self.api_key)
         self._interpret_cache: dict[str, str] = {}
+
+    def set_tier(self, tier: str | None):
+        tier = (tier or "free").lower().strip()
+        if tier == "pro":
+            self.model = self.model_pro
+            self.max_tokens = self.max_tokens_pro
+        else:
+            self.model = self.model_free
+            self.max_tokens = self.max_tokens_free
+
 
 
     def _fallback(self, inp: BriefingInputs, reason: str) -> str:
