@@ -148,17 +148,26 @@ class MapService:
             const fl = btn.getAttribute("data-fl") || null;
 
             const root = btn.closest("div");
-            const rawEl = root ? root.querySelector("pre[data-raw='1']") : null;
             const outEl = root ? root.querySelector("div[data-plain='1']") : null;
-            if(!rawEl || !outEl) return;
+            const rawText = root ? (root.getAttribute("data-rawtext") || "") : "";
+            if(!outEl) return;
 
-            // If we already have text, don't spam the API on re-open
+            // ✅ prevent repeat calls (popup re-renders / observer triggers)
             if(outEl.getAttribute("data-loaded") === "1") return;
+            if(outEl.getAttribute("data-busy") === "1") return;
+            outEl.setAttribute("data-busy", "1");
 
+            if(!rawText.trim()){
+            outEl.innerText = "No raw text found for this marker.";
+            outEl.setAttribute("data-busy", "0");
+            return;
+            }
+
+            // show loading state
+            outEl.innerText = "Interpreting...";
             btn.disabled = true;
-            btn.innerText = "Explaining...";
 
-            const body = { type: type, text: rawEl.innerText, station: station, fl: fl };
+            const body = { type: type, text: rawText, station: station, fl: fl };
 
             const resp = await fetch("/api/interpret", {
             method: "POST",
@@ -169,7 +178,7 @@ class MapService:
             if(!resp.ok){
             const txt = await resp.text();
             outEl.innerText = "Interpret error (" + resp.status + "): " + txt;
-            btn.innerText = "Explain";
+            outEl.setAttribute("data-busy", "0");
             btn.disabled = false;
             return;
             }
@@ -177,54 +186,45 @@ class MapService:
             const data = await resp.json();
             outEl.innerText = data.plain || "";
             outEl.setAttribute("data-loaded", "1");
-
-            btn.innerText = "Explained";
+            outEl.setAttribute("data-busy", "0");
             btn.disabled = false;
         }catch(e){
             try{
             const root = btn.closest("div");
             const outEl = root ? root.querySelector("div[data-plain='1']") : null;
-            if(outEl) outEl.innerText = "Interpretation failed.";
+            if(outEl){
+                outEl.innerText = "Interpretation failed.";
+                outEl.setAttribute("data-busy", "0");
+            }
             }catch(_){}
-            btn.innerText = "Explain";
             btn.disabled = false;
         }
         };
 
-        // Auto-run when any popup opens (Leaflet)
+
+        // Auto-run whenever a Leaflet popup appears in the DOM (Folium-safe)
         document.addEventListener("DOMContentLoaded", function(){
-        const tryWire = () => {
-            // Find the Leaflet map object created in the page
-            // Folium usually puts it on window with a generated name; we search for any map-like object.
-            for (const k in window){
-            const v = window[k];
-            if(v && typeof v.on === "function" && typeof v.eachLayer === "function"){
-                v.on("popupopen", function(e){
-                try{
-                    const el = e && e.popup && e.popup.getElement ? e.popup.getElement() : null;
-                    if(!el) return;
-                    const btn = el.querySelector("button[data-type]");
-                    if(btn){
-                    // hide the button (no need for user to click)
-                    btn.style.display = "none";
-                    window.__bbExplain(btn);
-                    }
-                }catch(_){}
-                });
-                return true;
-            }
-            }
-            return false;
+        const runIfReady = () => {
+            const popup = document.querySelector(".leaflet-popup");
+            if(!popup) return;
+
+            const btn = popup.querySelector("button[data-type]");
+            if(!btn) return;
+
+            // ✅ hide button so user never sees it
+            btn.style.display = "none";
+
+            // ✅ call explain once per popup (busy/loaded guards handle repeats)
+            window.__bbExplain(btn);
         };
 
-        // Try immediately, then retry a few times in case map initializes late
-        if(tryWire()) return;
-        let n = 0;
-        const t = setInterval(() => {
-            n += 1;
-            if(tryWire() || n > 20) clearInterval(t);
-        }, 250);
+        runIfReady();
+
+        const obs = new MutationObserver(() => runIfReady());
+        obs.observe(document.body, { childList: true, subtree: true });
         });
+
+
         </script>
         """
 
@@ -324,13 +324,15 @@ class MapService:
             icao = (row.get("icaoId") or row.get("stationId") or "").upper()
             cat = row.get("flightCat") or row.get("fltCat") or row.get("flightCategory")
             color = cat_color(cat)
-            plain = (row.get("plain") or "").strip()
+
             raw = row.get("rawOb") or row.get("rawObs") or row.get("rawText") or row.get("raw") or ""
             raw_safe = _html.escape(str(raw))
             station_safe = _html.escape(str(icao))
 
+            raw_attr = _html.escape(str(raw)).replace('"', "&quot;")
             popup_html = f"""
-            <div style="font: 13px/1.35 system-ui,-apple-system,'Segoe UI',Roboto,Arial;">
+            <div data-rawtext="{raw_attr}" style="font: 13px/1.35 system-ui,-apple-system,'Segoe UI',Roboto,Arial;">
+
             <div style="margin-bottom:6px;">
                 <b>{station_safe}</b>
                 <span style="padding:2px 6px;border-radius:10px;background:{color};color:white;">
@@ -338,13 +340,8 @@ class MapService:
                 </span>
             </div>
 
-            <button
-                style="padding:6px 10px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer;"
-                data-type="metar"
-                data-station="{station_safe}"
-                onclick="window.__bbExplain(this)">
-                Explain
-            </button>
+            <button data-type="metar" data-station="{station_safe}" style="display:none;"></button>
+
 
             <div data-plain="1" style="margin-top:8px; white-space:pre-wrap;">Interpreting...</div>
 
@@ -410,13 +407,15 @@ class MapService:
             tb2 = (p.get("tbInt2") or "")
             ic1 = (p.get("icgInt1") or "")
             ic2 = (p.get("icgInt2") or "")
-            plain = (p.get("plain") or "").strip()
+
             raw = p.get("rawOb") or p.get("raw") or ""
             raw_safe = _html.escape(str(raw))
             fl_safe = _html.escape(str(p.get("fltLvl") or ""))
 
+            raw_attr = _html.escape(str(raw)).replace('"', "&quot;")
             popup = f"""
-            <div style="font: 13px/1.35 system-ui,-apple-system,'Segoe UI',Roboto,Arial;">
+                        <div data-rawtext="{raw_attr}" style="font: 13px/1.35 system-ui,-apple-system,'Segoe UI',Roboto,Arial;">
+
             <div style="margin-bottom:6px;">
                 <b>PIREP</b>
                 <span style="padding:2px 6px;border-radius:10px;background:{color};color:white;">
@@ -426,13 +425,9 @@ class MapService:
                 <div>TB: {_html.escape(str(tb1))} {_html.escape(str(tb2))} | ICE: {_html.escape(str(ic1))} {_html.escape(str(ic2))}</div>
             </div>
 
-            <button
-                style="padding:6px 10px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer;"
-                data-type="pirep"
-                data-fl="{fl_safe}"
-                onclick="window.__bbExplain(this)">
-                Explain
-            </button>
+            <button data-type="pirep" data-fl="{fl_safe}" style="display:none;"></button>
+
+
 
             <div data-plain="1" style="margin-top:8px; white-space:pre-wrap;">Interpreting...</div>
 
