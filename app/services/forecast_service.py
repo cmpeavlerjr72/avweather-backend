@@ -146,9 +146,12 @@ class ForecastService:
                     icao = (r.get("icaoId") or r.get("stationId") or "").strip()
                     if raw:
                         r["plain"] = bs.interpret_metar(raw, station=icao)
-            except Exception:
-                # If OpenAI fails, we still keep the map functional with raw text
-                pass
+            except Exception as e:
+                # Keep map functional, but expose why plain text is missing
+                for r in metar_rows:
+                    if "plain" not in r:
+                        r["plain"] = f"(Interpretation unavailable: {type(e).__name__})"
+
 
 
         except Exception:
@@ -195,8 +198,11 @@ class ForecastService:
                     fl = p.get("fltLvl") or ""
                     if raw:
                         p["plain"] = bs.interpret_pirep(raw, fl=fl)
-            except Exception:
-                pass
+            except Exception as e:
+                for p in pirep_rows:
+                    if "plain" not in p:
+                        p["plain"] = f"(Interpretation unavailable: {type(e).__name__})"
+
 
 
         except Exception:
