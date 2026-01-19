@@ -29,6 +29,13 @@ AVIATION_SYSTEM_PROMPT = (
     "Do not invent data."
 )
 
+LAYMAN_SYSTEM_PROMPT = (
+    "You translate aviation weather codes into plain English for non-pilots. "
+    "Be calm, concise, and factual. Do not invent information. "
+    "If something is unknown/ambiguous, say so briefly."
+)
+
+
 def _as_paragraphs(text: str) -> str:
     """Convert a GPT string with blank lines into <p> paragraphs, HTML-escaped."""
     if not text:
@@ -37,11 +44,18 @@ def _as_paragraphs(text: str) -> str:
     parts = [p.strip() for p in safe.split("\n\n") if p.strip()]
     return "<p>" + "</p><p>".join(parts) + "</p>"
 
-def _chat_completions(client: OpenAI, user_prompt: str, model: str, max_tokens: int) -> str:
+def _chat_completions(
+    client: OpenAI,
+    user_prompt: str,
+    model: str,
+    max_tokens: int,
+    system_prompt: str,
+) -> str:
+
     resp = client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": AVIATION_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
         # IMPORTANT for GPT-5 family:
@@ -49,9 +63,16 @@ def _chat_completions(client: OpenAI, user_prompt: str, model: str, max_tokens: 
     )
     return (resp.choices[0].message.content or "").strip()
 
-def _responses_api(client: OpenAI, user_prompt: str, model: str, max_tokens: int) -> str:
+def _responses_api(
+    client: OpenAI,
+    user_prompt: str,
+    model: str,
+    max_tokens: int,
+    system_prompt: str,
+) -> str:
+
     messages = [
-        {"role": "system", "content": [{"type": "text", "text": AVIATION_SYSTEM_PROMPT}]},
+        {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
         {"role": "user", "content": [{"type": "text", "text": user_prompt}]},
     ]
     r = client.responses.create(
@@ -76,14 +97,23 @@ def _responses_api(client: OpenAI, user_prompt: str, model: str, max_tokens: int
                         parts.append(t)
     return "\n".join(parts).strip()
 
-def call_model_with_retries_for_briefing(client: OpenAI, user_prompt: str, primary_model: str, max_tokens: int) -> Tuple[str, list]:
+def call_model_with_retries_for_briefing(
+    client: OpenAI,
+    user_prompt: str,
+    primary_model: str,
+    max_tokens: int,
+    system_prompt: str = AVIATION_SYSTEM_PROMPT,
+) -> Tuple[str, list]:
+
+
     tried = []
 
     # 1) Chat completions attempts
     for m in [primary_model] + [x for x in MODEL_FALLBACKS if x != primary_model]:
         try:
             tried.append((m, "chat"))
-            text = _chat_completions(client, user_prompt, m, max_tokens)
+            text = _chat_completions(client, user_prompt, m, max_tokens, system_prompt)
+
             if text:
                 return text, tried
         except Exception as e:
@@ -93,7 +123,8 @@ def call_model_with_retries_for_briefing(client: OpenAI, user_prompt: str, prima
     for m in [primary_model] + [x for x in MODEL_FALLBACKS if x != primary_model]:
         try:
             tried.append((m, "responses"))
-            text = _responses_api(client, user_prompt, m, max_tokens)
+            text = _responses_api(client, user_prompt, m, max_tokens, system_prompt)
+
             if text:
                 return text, tried
         except Exception as e:
@@ -145,6 +176,8 @@ class BriefingService:
                 raise RuntimeError(msg)
 
         self.client = OpenAI(api_key=self.api_key)
+        self._interpret_cache: dict[str, str] = {}
+
 
     def _fallback(self, inp: BriefingInputs, reason: str) -> str:
         # Keep this short; you said you don’t want fallback, but if enabled, show why.
@@ -205,3 +238,76 @@ class BriefingService:
         if self.allow_fallback:
             return self._fallback(inp, reason)
         raise RuntimeError(reason)
+    
+    def interpret_metar(self, raw_metar: str, station: str | None = None) -> str:
+        raw_metar = (raw_metar or "").strip()
+        if not raw_metar:
+            return ""
+
+        key = f"METAR::{raw_metar}"
+        if key in self._interpret_cache:
+            return self._interpret_cache[key]
+
+        station = (station or "").upper().strip()
+        prompt_lines = []
+        if station:
+            prompt_lines.append(f"Station: {station}")
+        prompt_lines.append("Type: METAR")
+        prompt_lines.append(f"Raw: {raw_metar}")
+        prompt_lines.append("")
+        prompt_lines.append(
+            "Explain in 2–4 short bullet points for a passenger. Cover: "
+            "1) winds, 2) visibility/ceiling, 3) precip/obstructions if present, "
+            "4) a simple overall feel (good/okay/poor) without using VFR/IFR jargon. "
+            "Avoid acronyms; if you must use one, define it."
+        )
+        user_prompt = "\n".join(prompt_lines)
+
+        text, _tried = call_model_with_retries_for_briefing(
+            self.client,
+            user_prompt=user_prompt,
+            primary_model=self.model,
+            max_tokens=min(self.max_tokens, 180),
+            system_prompt=LAYMAN_SYSTEM_PROMPT,
+        )
+
+        out = (text or "").strip()
+        self._interpret_cache[key] = out
+        return out
+
+
+    def interpret_pirep(self, raw_pirep: str, fl: str | int | None = None) -> str:
+        raw_pirep = (raw_pirep or "").strip()
+        if not raw_pirep:
+            return ""
+
+        key = f"PIREP::{raw_pirep}"
+        if key in self._interpret_cache:
+            return self._interpret_cache[key]
+
+        prompt_lines = ["Type: PIREP"]
+        if fl not in (None, ""):
+            prompt_lines.append(f"Reported altitude: {fl}")
+        prompt_lines.append(f"Raw: {raw_pirep}")
+        prompt_lines.append("")
+        prompt_lines.append(
+            "Explain in 2–4 short bullet points for a passenger. "
+            "Focus on what it means for ride quality (smooth/light/moderate/severe). "
+            "If icing is mentioned, explain generally what that implies. "
+            "Do not give operational advice. Do not exaggerate."
+        )
+        user_prompt = "\n".join(prompt_lines)
+
+        text, _tried = call_model_with_retries_for_briefing(
+            self.client,
+            user_prompt=user_prompt,
+            primary_model=self.model,
+            max_tokens=min(self.max_tokens, 180),
+            system_prompt=LAYMAN_SYSTEM_PROMPT,
+        )
+
+        out = (text or "").strip()
+        self._interpret_cache[key] = out
+        return out
+
+

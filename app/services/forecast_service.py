@@ -138,6 +138,18 @@ class ForecastService:
 
             # Limit to avoid clutter
             metar_rows = inside[:40]
+            # Add layman interpretations for map popups
+            try:
+                bs = BriefingService()
+                for r in metar_rows:
+                    raw = (r.get("rawOb") or r.get("rawObs") or r.get("rawText") or r.get("raw") or "").strip()
+                    icao = (r.get("icaoId") or r.get("stationId") or "").strip()
+                    if raw:
+                        r["plain"] = bs.interpret_metar(raw, station=icao)
+            except Exception:
+                # If OpenAI fails, we still keep the map functional with raw text
+                pass
+
 
         except Exception:
             missing_products.append("metar")
@@ -175,6 +187,17 @@ class ForecastService:
                 inside = [p for p in inside if (_pirep_intensity(p) in ("MOD", "SEV"))]
 
             pirep_rows = inside[:60]
+            # Add layman interpretations for map popups
+            try:
+                bs = BriefingService()
+                for p in pirep_rows:
+                    raw = (p.get("rawOb") or p.get("raw") or "").strip()
+                    fl = p.get("fltLvl") or ""
+                    if raw:
+                        p["plain"] = bs.interpret_pirep(raw, fl=fl)
+            except Exception:
+                pass
+
 
         except Exception:
             missing_products.append("pirep")

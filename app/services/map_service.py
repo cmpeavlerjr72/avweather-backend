@@ -229,17 +229,28 @@ class MapService:
                 continue
 
             icao = (row.get("icaoId") or row.get("stationId") or "").upper()
-            raw = row.get("rawOb") or row.get("rawObs") or row.get("rawText") or ""
             cat = row.get("flightCat") or row.get("fltCat") or row.get("flightCategory")
-            cat = cat.strip().upper() if isinstance(cat, str) else None
-
             color = cat_color(cat)
+            plain = (row.get("plain") or "").strip()
+            raw = row.get("rawOb") or row.get("rawObs") or row.get("rawText") or row.get("raw") or ""
+
             popup_html = (
                 f"<b>{icao}</b> "
                 f"<span style='padding:2px 6px;border-radius:10px;background:{color};color:white;'>"
                 f"{(cat or 'UNK')}</span>"
-                f"<br><pre style='white-space:pre-wrap;margin-top:6px;'>{raw}</pre>"
             )
+
+            if plain:
+                popup_html += f"<div style='margin-top:6px;'>{_as_paragraphs(plain)}</div>"
+                if raw:
+                    popup_html += (
+                        "<details style='margin-top:8px;'><summary>Show raw METAR</summary>"
+                        f"<pre style='white-space:pre-wrap;margin-top:6px;'>{_html.escape(str(raw))}</pre>"
+                        "</details>"
+                    )
+            else:
+                popup_html += f"<br><pre style='white-space:pre-wrap;margin-top:6px;'>{raw}</pre>"
+
 
             folium.CircleMarker(
                 location=[lat, lon],
@@ -294,6 +305,7 @@ class MapService:
             tb2 = (p.get("tbInt2") or "")
             ic1 = (p.get("icgInt1") or "")
             ic2 = (p.get("icgInt2") or "")
+            plain = (p.get("plain") or "").strip()
             raw = p.get("rawOb") or p.get("raw") or ""
 
             popup = (
@@ -302,8 +314,19 @@ class MapService:
                 f"{(lvl or 'UNK')}</span>"
                 f"<br>FL: {fl}"
                 f"<br>TB: {tb1} {tb2} | ICE: {ic1} {ic2}"
-                f"<br><pre style='white-space:pre-wrap;margin-top:6px;'>{raw}</pre>"
             )
+
+            if plain:
+                popup += f"<div style='margin-top:6px;'>{_as_paragraphs(plain)}</div>"
+                if raw:
+                    popup += (
+                        "<details style='margin-top:8px;'><summary>Show raw PIREP</summary>"
+                        f"<pre style='white-space:pre-wrap;margin-top:6px;'>{_html.escape(str(raw))}</pre>"
+                        "</details>"
+                    )
+            else:
+                popup += f"<br><pre style='white-space:pre-wrap;margin-top:6px;'>{raw}</pre>"
+
 
             folium.CircleMarker(
                 location=[lat, lon],
