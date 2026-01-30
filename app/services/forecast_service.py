@@ -3,6 +3,8 @@ from app.storage.map_store import MapStore
 from app.utils.ids import new_id
 from app.services.airport_selector import airports_in_corridor
 from app.services.briefing_service import BriefingService, BriefingInputs
+from app.services.briefing_service_alt import BriefingService as BriefingServiceAlt  # <-- add this
+
 from shapely.geometry import Point, shape
 
 from shapely.geometry import shape as shp_shape
@@ -94,7 +96,8 @@ class ForecastService:
         self.map_service = map_service
         self.aviationweather = aviationweather
 
-    async def generate(self, req: ForecastRequest) -> ForecastResponse:
+    async def generate(self, req: ForecastRequest, briefing_version: str = "v1") -> ForecastResponse:
+
         map_id = new_id()
 
         # 1) Route + corridor
@@ -302,7 +305,12 @@ class ForecastService:
             },
         }
 
-        bs = BriefingService()
+        # Choose briefing implementation (v1=prod, v2=experimental)
+        if briefing_version == "v2":
+            bs = BriefingServiceAlt()
+        else:
+            bs = BriefingService()
+
         bs.set_tier(getattr(req, "tier", "free"))
 
         briefing = bs.generate(
@@ -315,7 +323,7 @@ class ForecastService:
                 origin_metar_cat=origin_cat,
                 dest_metar_cat=dest_cat,
 
-                origin_metar_raw=None,  # optional; we can wire this later if you want
+                origin_metar_raw=None,
                 dest_metar_raw=None,
 
                 origin_taf_raw=(o_taf or {}).get("raw"),
