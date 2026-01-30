@@ -184,7 +184,7 @@ class BriefingService:
         self.model_free = (os.getenv("OPENAI_MODEL_FREE") or "gpt-4o-mini").strip()
         self.model_pro = (os.getenv("OPENAI_MODEL_PRO") or "gpt-5").strip()
 
-        self.max_tokens_free = int(os.getenv("OPENAI_MAX_TOKENS_FREE", "180"))
+        self.max_tokens_free = int(os.getenv("OPENAI_MAX_TOKENS_FREE", "600"))
         self.max_tokens_pro = int(os.getenv("OPENAI_MAX_TOKENS_PRO", "320"))
 
         # default behavior (no IAP yet): free
