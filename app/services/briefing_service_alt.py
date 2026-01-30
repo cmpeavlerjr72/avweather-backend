@@ -220,6 +220,8 @@ class BriefingService:
             "smooth",
             "smoother",
             "predict",
+            "turbulence",
+            "forecast",
         ]
         return any(b in t for b in banned_substrings)
 
@@ -271,7 +273,7 @@ class BriefingService:
         )
         lines.append("")
         lines.append("SCOPE / SAFETY (must follow):")
-        lines.append("- This is an educational weather context briefing, not a turbulence forecast.")
+        lines.append("- This is an educational weather context briefing, NOT a turbulence forecast.")
         lines.append("- Do NOT predict turbulence intensity or timing. Do NOT promise smoothness.")
         lines.append("- Do NOT provide any 'turbulence score', 'ride quality', or comfort rating.")
         lines.append("- Use ONLY the provided data; if something is unknown, say so.")
@@ -302,7 +304,7 @@ class BriefingService:
                     base_prompt
                     + "\n\nREWRITE NOTE: The previous draft included banned promise/prediction language. "
                       "Rewrite while strictly avoiding: smooth/smoother, expect, predict, guarantee, "
-                      "turbulence score, ride quality. Do not imply certainty."
+                      "turbulence, forecast, ride quality. Do not imply certainty."
                 )
 
             text, tried = call_model_with_retries_for_briefing(
